@@ -63,6 +63,13 @@ log.addHandler(NullHandler())
 
 AppUtils.configureLogging()
 
+#============================ helpers =========================================
+
+def logcrash(err):
+    output = traceback.format_exc()
+    print output
+    log.critical(output)
+
 #============================ defines =========================================
 
 GUI_UPDATEPERIOD = 250   # in ms
@@ -266,7 +273,7 @@ class notifClient(object):
             if notifName in [IpMgrSubscribe.IpMgrSubscribe.NOTIFDATA]:
                 self.oap_dispatch.dispatch_pkt(notifName, notifParams)
         except Exception as err:
-            print err
+            logcrash(err)
     
     def _eventCallback(self, notifName, notifParams):
         
@@ -295,9 +302,7 @@ class notifClient(object):
                 raise SystemError(output)
         
         except Exception as err:
-            output = traceback.format_exc()
-            print output
-            log.critical(output)
+            logcrash(err)
         
         finally:
             
