@@ -34,10 +34,8 @@ import traceback
 from   SmartMeshSDK.utils              import AppUtils,                   \
                                               FormatUtils,                \
                                               LatencyCalculator
-from   SmartMeshSDK.ApiDefinition      import IpMgrDefinition,            \
-                                              HartMgrDefinition
-from   SmartMeshSDK.IpMgrConnectorMux  import IpMgrSubscribe,             \
-                                              IpMgrConnectorMux
+from   SmartMeshSDK.ApiDefinition      import IpMgrDefinition
+from   SmartMeshSDK.IpMgrConnectorMux  import IpMgrSubscribe
 from   SmartMeshSDK.ApiException       import APIError
 from   SmartMeshSDK.protocols.oap      import OAPDispatcher,              \
                                               OAPClient,                  \
@@ -47,8 +45,7 @@ from   dustUI                          import dustWindow,                 \
                                               dustFrameApi,               \
                                               dustFrameConnection,        \
                                               dustFrameMoteList,          \
-                                              dustFrameText,              \
-                                              dustStyle
+                                              dustFrameText
 
 #============================ logging =========================================
 
@@ -65,6 +62,13 @@ log.addHandler(NullHandler())
 # global
 
 AppUtils.configureLogging()
+
+#============================ helpers =========================================
+
+def logcrash(err):
+    output = traceback.format_exc()
+    print output
+    log.critical(output)
 
 #============================ defines =========================================
 
@@ -202,71 +206,74 @@ class notifClient(object):
     
     def _dataCallback(self, notifName, notifParams):
         
-        # log
-        if   isinstance(self.apiDef,IpMgrDefinition.IpMgrDefinition):
-            # IpMgrSubscribe generates a named tuple
-            log.debug(
-                "notifClient._dataCallback {0}:\n{1}".format(
-                    notifName,
-                    FormatUtils.formatNamedTuple(notifParams)
-                )
-            )
-        else:
-            output = "apiDef of type {0} unexpected".format(type(self.apiDef))
-            log.critical(output)
-            print output
-            raise SystemError(output)
-        
-        # record current time
-        timeNow = time.time()
-        
-        # read MAC address from notification
-        mac = self._getMacFromNotifParams(notifParams)
-        
-        # lock the data structure
-        self.dataLock.acquire()
-        
-        # add mac/type to data, if necessary
-        if mac not in self.data:
-            self.data[mac] = {}
-        if notifName not in self.data[mac]:
-            self.data[mac][notifName] = 0
-            
-        # add mac/type to updates, if necessary
-        if mac not in self.updates:
-            self.updates[mac] = []
-        if notifName not in self.updates[mac]:
-            self.updates[mac].append(notifName)
-        
-        # increment counter
-        self.data[mac][notifName] += 1
-        
-        # calculate latency
         try:
-            if notifName in [IpMgrSubscribe.IpMgrSubscribe.NOTIFDATA,
-                             IpMgrSubscribe.IpMgrSubscribe.NOTIFIPDATA,]:
-                try:
-                    latency = self.latencyCalculator.getLatency(
-                            float(notifParams.utcSecs)+(float(notifParams.utcUsecs)/1000000.0),
-                            timeNow)
-                    # lat. current
-                    if COL_LAT_CUR not in self.data[mac]:
-                        self.data[mac][COL_LAT_CUR] = '-'
-                    if COL_LAT_CUR not in self.updates[mac]:
-                        self.updates[mac].append(COL_LAT_CUR)
-                    self.data[mac][COL_LAT_CUR] = latency
-                except RuntimeError:
-                    # can happen if latency calculator hasn't acquired lock yet
-                    pass
+            # log
+            if   isinstance(self.apiDef,IpMgrDefinition.IpMgrDefinition):
+                # IpMgrSubscribe generates a named tuple
+                log.debug(
+                    "notifClient._dataCallback {0}:\n{1}".format(
+                        notifName,
+                        FormatUtils.formatNamedTuple(notifParams)
+                    )
+                )
+            else:
+                output = "apiDef of type {0} unexpected".format(type(self.apiDef))
+                log.critical(output)
+                print output
+                raise SystemError(output)
+            
+            # record current time
+            timeNow = time.time()
+            
+            # read MAC address from notification
+            mac = self._getMacFromNotifParams(notifParams)
+            
+            # lock the data structure
+            self.dataLock.acquire()
+            
+            # add mac/type to data, if necessary
+            if mac not in self.data:
+                self.data[mac] = {}
+            if notifName not in self.data[mac]:
+                self.data[mac][notifName] = 0
+                
+            # add mac/type to updates, if necessary
+            if mac not in self.updates:
+                self.updates[mac] = []
+            if notifName not in self.updates[mac]:
+                self.updates[mac].append(notifName)
+            
+            # increment counter
+            self.data[mac][notifName] += 1
+            
+            # calculate latency
+            try:
+                if notifName in [IpMgrSubscribe.IpMgrSubscribe.NOTIFDATA,
+                                 IpMgrSubscribe.IpMgrSubscribe.NOTIFIPDATA,]:
+                    try:
+                        latency = self.latencyCalculator.getLatency(
+                                float(notifParams.utcSecs)+(float(notifParams.utcUsecs)/1000000.0),
+                                timeNow)
+                        # lat. current
+                        if COL_LAT_CUR not in self.data[mac]:
+                            self.data[mac][COL_LAT_CUR] = '-'
+                        if COL_LAT_CUR not in self.updates[mac]:
+                            self.updates[mac].append(COL_LAT_CUR)
+                        self.data[mac][COL_LAT_CUR] = latency
+                    except RuntimeError:
+                        # can happen if latency calculator hasn't acquired lock yet
+                        pass
+            except Exception as err:
+                print err
+            
+            # unlock the data structure
+            self.dataLock.release()
+            
+            # parse OAP packet
+            if notifName in [IpMgrSubscribe.IpMgrSubscribe.NOTIFDATA]:
+                self.oap_dispatch.dispatch_pkt(notifName, notifParams)
         except Exception as err:
-            print err
-        
-        # unlock the data structure
-        self.dataLock.release()
-        
-        # parse OAP packet
-        if notifName in [IpMgrSubscribe.IpMgrSubscribe.NOTIFDATA]:
-            self.oap_dispatch.dispatch_pkt(notifName, notifParams)
+            logcrash(err)
     
     def _eventCallback(self, notifName, notifParams):
         
@@ -295,9 +302,7 @@ class notifClient(object):
                 raise SystemError(output)
         
         except Exception as err:
-            output = traceback.format_exc()
-            print output
-            log.critical(output)
+            logcrash(err)
         
         finally:
             
@@ -523,11 +528,11 @@ class DigitalMonitorGui(object):
         
         # start a notification client
         self.notifClientHandler = notifClient(
-                    self.apiDef,
-                    self.connector,
-                    self._connectionFrameCb_disconnected,
-                    self.latencyCalculator,
-                )
+            self.apiDef,
+            self.connector,
+            self._connectionFrameCb_disconnected,
+            self.latencyCalculator,
+        )
         
         # retrieve list of motes from manager
         macs = self._getOperationalMotesMacAddresses()
@@ -590,12 +595,13 @@ class DigitalMonitorGui(object):
     
         # send the OAP message
         try:
-            self.oap_clients[mac].send( OAPMessage.CmdType.PUT,                    # command
-                                        [2,0],                                     # address
-                                        data_tags=[OAPMessage.TLVByte(t=0,v=val),
-                                                   OAPMessage.TLVByte(t=1,v=1),],  # parameters
-                                        cb=None,                                   # callback
-                                      )
+            self.oap_clients[mac].send(
+                OAPMessage.CmdType.PUT,                    # command
+                [2,0],                                     # address
+                data_tags=[OAPMessage.TLVByte(t=0,v=val),
+                           OAPMessage.TLVByte(t=1,v=1),],  # parameters
+                cb=None,                                   # callback
+              )
         except APIError as err:
             self.statusFrame.write("[WARNING] {0}".format(err))
         else:
@@ -611,12 +617,13 @@ class DigitalMonitorGui(object):
     
         # send the OAP message
         try:
-            self.oap_clients[mac].send( OAPMessage.CmdType.PUT,                     # command
-                                        [DIGITAL_IN_ADDR,val1],                     # address
-                                        data_tags=[OAPMessage.TLVByte(t=0,v=val2),
-                                                   OAPMessage.TLVByte(t=3,v=val3),],# parameters
-                                        cb=None,                                    # callback
-                                      )
+            self.oap_clients[mac].send(
+                OAPMessage.CmdType.PUT,                         # command
+                    [DIGITAL_IN_ADDR,val1],                     # address
+                    data_tags=[OAPMessage.TLVByte(t=0,v=val2),
+                               OAPMessage.TLVByte(t=3,v=val3),],# parameters
+                    cb=None,                                    # callback
+                )
         except APIError as err:
             self.statusFrame.write("[WARNING] {0}".format(err))
         else:
